@@ -14,7 +14,8 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.25.1",
-    "serve": "^14.2.4"
+    "serve": "^14.2.4",
+    "team-task-manager": "file:.."
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",

@@ -98,27 +98,27 @@ The frontend runs on Vite's default local URL, usually `http://localhost:5173`.
 
 ## Railway Deploy
 
-Deploy this repo as two Railway services from the same GitHub repository:
+This repo includes deployment changes for a single Railway service from the repository root:
 
-### Backend service
-
-- Root directory: `backend`
-- Start command: `npm start`
-- Required variables:
-  - `MONGO_URI`
-  - `JWT_SECRET`
-  - `PORT`
-  - `FRONTEND_URL`
-
-### Frontend service
-
-- Root directory: `frontend`
+- Root directory: repository root
 - Build command: `npm run build`
 - Start command: `npm start`
-- Required variables:
-  - `VITE_API_URL`
 
-Set:
+What the deployment does:
 
-- `FRONTEND_URL` to your Railway frontend domain, for example `https://your-frontend.up.railway.app`
-- `VITE_API_URL` to your Railway backend API base, for example `https://your-backend.up.railway.app/api`
+- Root [package.json](./package.json) installs backend and frontend dependencies and builds the Vite app
+- [backend/server.js](./backend/server.js) serves the compiled frontend from `frontend/dist` when `NODE_ENV=production`
+- [frontend/src/services/api.js](./frontend/src/services/api.js) uses `/api` in production unless `VITE_API_URL` is explicitly set
+
+Required backend variables:
+
+- `MONGO_URI`
+- `JWT_SECRET`
+- `PORT`
+- `FRONTEND_URL`
+
+Recommended values:
+
+- `FRONTEND_URL` should include your Railway frontend domain after deploy
+- If frontend and backend are served from the same Railway app, `VITE_API_URL` can be left unset because the frontend already falls back to `/api`
+- If you split frontend and backend into separate Railway services later, set `VITE_API_URL` to your backend API base, for example `https://your-backend.up.railway.app/api`

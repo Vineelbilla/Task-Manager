@@ -1,4 +1,5 @@
 const express = require("express");
+const path = require("path");
 const cors = require("cors");
 const morgan = require("morgan");
 const dotenv = require("dotenv");
@@ -36,10 +37,28 @@ app.use(
 app.use(express.json());
 app.use(morgan("dev"));
 
-app.get("/", (req, res) => {
-  res
-    .status(200)
-    .send(`<!DOCTYPE html>
+app.use("/api/auth", authRoutes);
+app.use("/api/admin", adminRoutes);
+app.use("/api/projects", projectRoutes);
+app.use("/api/tasks", taskRoutes);
+app.get("/api/dashboard", protect, getDashboard);
+
+if (process.env.NODE_ENV === "production") {
+  const frontendDistPath = path.join(__dirname, "..", "frontend", "dist");
+  app.use(express.static(frontendDistPath));
+
+  app.get("*", (req, res, next) => {
+    if (req.path.startsWith("/api/")) {
+      return next();
+    }
+
+    return res.sendFile(path.join(frontendDistPath, "index.html"));
+  });
+} else {
+  app.get("/", (req, res) => {
+    res
+      .status(200)
+      .send(`<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -93,13 +112,8 @@ app.get("/", (req, res) => {
     </div>
   </body>
 </html>`);
-});
-
-app.use("/api/auth", authRoutes);
-app.use("/api/admin", adminRoutes);
-app.use("/api/projects", projectRoutes);
-app.use("/api/tasks", taskRoutes);
-app.get("/api/dashboard", protect, getDashboard);
+  });
+}
 
 app.use((req, res) => {
   res.status(404).json({ message: "Route not found" });
