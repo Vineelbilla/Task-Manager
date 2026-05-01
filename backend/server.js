@@ -16,7 +16,23 @@ connectDB();
 
 const app = express();
 
-app.use(cors());
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!process.env.FRONTEND_URL || !origin) {
+        return callback(null, true);
+      }
+
+      const allowedOrigins = process.env.FRONTEND_URL.split(",").map((item) => item.trim());
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error("Not allowed by CORS"));
+    },
+    credentials: true,
+  })
+);
 app.use(express.json());
 app.use(morgan("dev"));
 
