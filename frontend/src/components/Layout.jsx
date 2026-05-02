@@ -1,10 +1,41 @@
+import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import api from "../services/api";
 
 const Layout = ({ children }) => {
   const { user, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const [pendingTaskCount, setPendingTaskCount] = useState(0);
+
+  useEffect(() => {
+    if (!user || user.role !== "Member") {
+      setPendingTaskCount(0);
+      return undefined;
+    }
+
+    const loadPendingTasks = async () => {
+      try {
+        const { data } = await api.get("/dashboard");
+        const pendingTasks =
+          data?.assignedTasks?.filter((task) => task.status !== "DONE").length || 0;
+        setPendingTaskCount(pendingTasks);
+      } catch (error) {
+        setPendingTaskCount(0);
+      }
+    };
+
+    loadPendingTasks();
+
+    const intervalId = window.setInterval(loadPendingTasks, 15000);
+    window.addEventListener("focus", loadPendingTasks);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", loadPendingTasks);
+    };
+  }, [user]);
 
   const handleLogout = () => {
     logout();
@@ -32,7 +63,10 @@ const Layout = ({ children }) => {
               className={location.pathname === link.to ? "nav-link active" : "nav-link"}
               to={link.to}
             >
-              {link.label}
+              <span>{link.label}</span>
+              {user?.role === "Member" && link.to === "/tasks" && pendingTaskCount > 0 && (
+                <span className="nav-badge">{pendingTaskCount}</span>
+              )}
             </Link>
           ))}
         </nav>

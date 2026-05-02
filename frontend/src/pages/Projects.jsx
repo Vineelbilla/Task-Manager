@@ -185,7 +185,11 @@ const Projects = () => {
     <Layout>
       <section className="page-header">
         <h2>Projects</h2>
-        <p>Create projects, tick members, and then assign tasks to those members.</p>
+        <p>
+          {user?.role === "Admin"
+            ? "Create projects, add members, and organize work across the team."
+            : "View the projects you are part of and check who is involved."}
+        </p>
       </section>
 
       <Notification message={message} type="success" />

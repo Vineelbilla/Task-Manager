@@ -225,6 +225,43 @@ const updateTask = async (req, res, next) => {
   }
 };
 
+const deleteTask = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid task id" });
+    }
+
+    const task = await Task.findById(id);
+    if (!task) {
+      return res.status(404).json({ message: "Task not found" });
+    }
+
+    const project = await Project.findById(task.projectId);
+    if (!project) {
+      return res.status(404).json({ message: "Related project not found" });
+    }
+
+    const isProjectMember = project.members.some(
+      (memberId) => memberId.toString() === req.user._id.toString()
+    );
+    if (!isProjectMember && project.createdBy.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: "You do not have access to this task" });
+    }
+
+    if (req.user.role !== "Admin") {
+      return res.status(403).json({ message: "Only admins can delete tasks" });
+    }
+
+    await task.deleteOne();
+
+    return res.status(200).json({ message: "Task deleted successfully" });
+  } catch (error) {
+    next(error);
+  }
+};
+
 const getDashboard = async (req, res, next) => {
   try {
     await cleanupOrphanTasks();
@@ -299,5 +336,6 @@ module.exports = {
   createTask,
   getTasks,
   updateTask,
+  deleteTask,
   getDashboard,
 };

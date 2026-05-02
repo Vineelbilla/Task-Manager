@@ -6,63 +6,156 @@ import StatCard from "../components/StatCard";
 import { useAuth } from "../context/AuthContext";
 import api from "../services/api";
 
+const initialUserForm = {
+  name: "",
+  email: "",
+  role: "Member",
+};
+
 const Dashboard = () => {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const [dashboard, setDashboard] = useState(null);
   const [userStats, setUserStats] = useState([]);
   const [selectedUserId, setSelectedUserId] = useState("");
+  const [editingUserId, setEditingUserId] = useState("");
+  const [editingUserForm, setEditingUserForm] = useState(initialUserForm);
   const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [savingUserId, setSavingUserId] = useState("");
+  const [deletingUserId, setDeletingUserId] = useState("");
 
   const isAdmin = user?.role === "Admin";
-  const topPerformer = userStats.reduce(
-    (best, current) =>
-      !best || current.tasksCompleted > best.tasksCompleted ? current : best,
-    null
-  );
+  const sortedUserStats = [...userStats].sort((firstUser, secondUser) => {
+    if (secondUser.tasksCompleted !== firstUser.tasksCompleted) {
+      return secondUser.tasksCompleted - firstUser.tasksCompleted;
+    }
+
+    if (secondUser.totalTasksAssigned !== firstUser.totalTasksAssigned) {
+      return secondUser.totalTasksAssigned - firstUser.totalTasksAssigned;
+    }
+
+    return firstUser.name.localeCompare(secondUser.name);
+  });
+  const topPerformer = sortedUserStats[0] || null;
   const selectedUser =
-    userStats.find((member) => String(member.userId) === String(selectedUserId)) || null;
+    sortedUserStats.find((member) => String(member.userId) === String(selectedUserId)) || null;
   const selectedUserTasks =
     dashboard?.allTasks?.filter(
       (task) => String(task.assignedTo?._id || task.assignedTo?.id) === String(selectedUserId)
     ) || [];
 
-  useEffect(() => {
-    const fetchDashboard = async () => {
-      setLoading(true);
-      try {
-        const requests = [api.get("/dashboard")];
-        if (isAdmin) {
-          requests.push(api.get("/admin/user-stats"));
+  const fetchDashboardData = async () => {
+    setLoading(true);
+    try {
+      const requests = [api.get("/dashboard")];
+      if (isAdmin) {
+        requests.push(api.get("/admin/user-stats"));
+      }
+
+      const [dashboardResponse, userStatsResponse] = await Promise.all(requests);
+      setDashboard(dashboardResponse.data);
+      const stats = userStatsResponse?.data || [];
+      setUserStats(stats);
+      const sortedStats = [...stats].sort((firstUser, secondUser) => {
+        if (secondUser.tasksCompleted !== firstUser.tasksCompleted) {
+          return secondUser.tasksCompleted - firstUser.tasksCompleted;
         }
 
-        const [dashboardResponse, userStatsResponse] = await Promise.all(requests);
-        setDashboard(dashboardResponse.data);
-        const stats = userStatsResponse?.data || [];
-        setUserStats(stats);
-        setSelectedUserId((currentSelectedUserId) => {
-          if (!isAdmin || !stats.length) {
-            return "";
-          }
+        if (secondUser.totalTasksAssigned !== firstUser.totalTasksAssigned) {
+          return secondUser.totalTasksAssigned - firstUser.totalTasksAssigned;
+        }
 
-          const stillExists = stats.some(
-            (member) => String(member.userId) === String(currentSelectedUserId)
-          );
-          if (stillExists) {
-            return currentSelectedUserId;
-          }
+        return firstUser.name.localeCompare(secondUser.name);
+      });
+      setSelectedUserId((currentSelectedUserId) => {
+        if (!isAdmin || !stats.length) {
+          return "";
+        }
 
-          return String(stats[0].userId);
-        });
-      } catch (requestError) {
-        setError(requestError.response?.data?.message || "Failed to load dashboard");
-      } finally {
-        setLoading(false);
-      }
-    };
+        const stillExists = sortedStats.some(
+          (member) => String(member.userId) === String(currentSelectedUserId)
+        );
+        if (stillExists) {
+          return currentSelectedUserId;
+        }
 
-    fetchDashboard();
+        return String(sortedStats[0].userId);
+      });
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Failed to load dashboard");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDashboardData();
   }, [isAdmin]);
+
+  const startEditingUser = (member) => {
+    setEditingUserId(String(member.userId));
+    setEditingUserForm({
+      name: member.name,
+      email: member.email,
+      role: member.role,
+    });
+    setMessage("");
+    setError("");
+  };
+
+  const cancelEditingUser = () => {
+    setEditingUserId("");
+    setEditingUserForm(initialUserForm);
+  };
+
+  const handleEditingUserChange = (event) => {
+    setEditingUserForm((prev) => ({ ...prev, [event.target.name]: event.target.value }));
+  };
+
+  const handleSaveUser = async (userId) => {
+    setMessage("");
+    setError("");
+
+    if (!editingUserForm.name || !editingUserForm.email || !editingUserForm.role) {
+      setError("Name, email, and role are required");
+      return;
+    }
+
+    setSavingUserId(String(userId));
+    try {
+      const { data } = await api.put(`/admin/users/${userId}`, editingUserForm);
+      if (String(userId) === String(user?.id)) {
+        updateUser(data.user);
+      }
+      setMessage("User updated successfully");
+      cancelEditingUser();
+      await fetchDashboardData();
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Failed to update user");
+    } finally {
+      setSavingUserId("");
+    }
+  };
+
+  const handleDeleteUser = async (userId) => {
+    setMessage("");
+    setError("");
+    setDeletingUserId(String(userId));
+
+    try {
+      await api.delete(`/admin/users/${userId}`);
+      if (editingUserId === String(userId)) {
+        cancelEditingUser();
+      }
+      setMessage("User deleted successfully");
+      await fetchDashboardData();
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Failed to delete user");
+    } finally {
+      setDeletingUserId("");
+    }
+  };
 
   return (
     <Layout>
@@ -76,6 +169,7 @@ const Dashboard = () => {
         {isAdmin && <span className="view-label">Admin View</span>}
       </section>
 
+      <Notification message={message} type="success" />
       <Notification message={error} type="error" />
 
       {loading ? (
@@ -112,13 +206,27 @@ const Dashboard = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {dashboard.allTasks.map((task) => (
-                        <tr key={task._id}>
-                          <td>{task.title}</td>
+                      {dashboard.allTasks.map((task) => {
+                        const isPendingTask = task.status !== "DONE";
+
+                        return (
+                        <tr className={isPendingTask ? "pending-task-row" : ""} key={task._id}>
+                          <td>
+                            <div className="task-title-cell">
+                              {isPendingTask && <span className="task-alert-dot" />}
+                              <span>{task.title}</span>
+                            </div>
+                          </td>
                           <td>{task.projectId?.name || "Deleted Project"}</td>
                           <td>{task.assignedTo?.name || "-"}</td>
                           <td>{task.createdBy?.name || "-"}</td>
-                          <td>{task.status}</td>
+                          <td>
+                            <span
+                              className={isPendingTask ? "task-status-chip pending" : "task-status-chip"}
+                            >
+                              {task.status}
+                            </span>
+                          </td>
                           <td>{new Date(task.dueDate).toLocaleDateString()}</td>
                           <td>
                             {task.completedAt
@@ -126,7 +234,7 @@ const Dashboard = () => {
                               : "-"}
                           </td>
                         </tr>
-                      ))}
+                      )})}
                     </tbody>
                   </table>
                 </div>
@@ -170,48 +278,6 @@ const Dashboard = () => {
           {isAdmin && (
             <section className="panel">
               <div className="panel-header">
-                <h3>Recent Tasks</h3>
-              </div>
-              {dashboard?.recentTasks?.length ? (
-                <div className="table-wrapper">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Title</th>
-                        <th>Project</th>
-                        <th>Assigned To</th>
-                        <th>Status</th>
-                        <th>Created</th>
-                        <th>Completed On</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {dashboard.recentTasks.map((task) => (
-                        <tr key={task._id}>
-                          <td>{task.title}</td>
-                          <td>{task.projectId?.name || "Deleted Project"}</td>
-                          <td>{task.assignedTo?.name || "-"}</td>
-                          <td>{task.status}</td>
-                          <td>{new Date(task.createdAt).toLocaleDateString()}</td>
-                          <td>
-                            {task.completedAt
-                              ? new Date(task.completedAt).toLocaleDateString()
-                              : "-"}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <p className="empty-state">No recent tasks available.</p>
-              )}
-            </section>
-          )}
-
-          {isAdmin && (
-            <section className="panel">
-              <div className="panel-header">
                 <h3>Team Performance</h3>
               </div>
               {topPerformer && (
@@ -220,7 +286,7 @@ const Dashboard = () => {
                   tasks
                 </p>
               )}
-              {userStats.length ? (
+              {sortedUserStats.length ? (
                 <div className="table-wrapper">
                   <table>
                     <thead>
@@ -234,7 +300,7 @@ const Dashboard = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {userStats.map((member) => (
+                      {sortedUserStats.map((member) => (
                         <tr
                           className={
                             [
@@ -290,12 +356,26 @@ const Dashboard = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {selectedUserTasks.map((task) => (
-                        <tr key={task._id}>
-                          <td>{task.title}</td>
+                      {selectedUserTasks.map((task) => {
+                        const isPendingTask = task.status !== "DONE";
+
+                        return (
+                        <tr className={isPendingTask ? "pending-task-row" : ""} key={task._id}>
+                          <td>
+                            <div className="task-title-cell">
+                              {isPendingTask && <span className="task-alert-dot" />}
+                              <span>{task.title}</span>
+                            </div>
+                          </td>
                           <td>{task.projectId?.name || "Deleted Project"}</td>
                           <td>{task.createdBy?.name || "-"}</td>
-                          <td>{task.status}</td>
+                          <td>
+                            <span
+                              className={isPendingTask ? "task-status-chip pending" : "task-status-chip"}
+                            >
+                              {task.status}
+                            </span>
+                          </td>
                           <td>{new Date(task.dueDate).toLocaleDateString()}</td>
                           <td>
                             {task.completedAt
@@ -303,12 +383,135 @@ const Dashboard = () => {
                               : "-"}
                           </td>
                         </tr>
-                      ))}
+                      )})}
                     </tbody>
                   </table>
                 </div>
               ) : (
                 <p className="empty-state">No tasks are assigned to this user yet.</p>
+              )}
+            </section>
+          )}
+
+          {isAdmin && (
+            <section className="panel">
+              <div className="panel-header">
+                <h3>Manage Users</h3>
+              </div>
+              <p className="helper-text">
+                Update names, emails, and roles, or remove users that should no longer have
+                access.
+              </p>
+              {sortedUserStats.length ? (
+                <div className="table-wrapper">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Role</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedUserStats.map((member) => (
+                        <tr key={`manage-${member.userId}`}>
+                          <td>
+                            {editingUserId === String(member.userId) ? (
+                              <input
+                                name="name"
+                                onChange={handleEditingUserChange}
+                                type="text"
+                                value={editingUserForm.name}
+                              />
+                            ) : (
+                              member.name
+                            )}
+                          </td>
+                          <td>
+                            {editingUserId === String(member.userId) ? (
+                              <input
+                                name="email"
+                                onChange={handleEditingUserChange}
+                                type="email"
+                                value={editingUserForm.email}
+                              />
+                            ) : (
+                              member.email
+                            )}
+                          </td>
+                          <td>
+                            {editingUserId === String(member.userId) ? (
+                              member.role === "Admin" ? (
+                                <input disabled type="text" value={editingUserForm.role} />
+                              ) : (
+                                <select
+                                  name="role"
+                                  onChange={handleEditingUserChange}
+                                  value={editingUserForm.role}
+                                >
+                                  <option value="Admin">Admin</option>
+                                  <option value="Member">Member</option>
+                                </select>
+                              )
+                            ) : (
+                              member.role
+                            )}
+                          </td>
+                          <td>
+                            <div className="action-row">
+                              {editingUserId === String(member.userId) ? (
+                                <>
+                                  <button
+                                    className="primary-btn"
+                                    disabled={savingUserId === String(member.userId)}
+                                    onClick={() => handleSaveUser(member.userId)}
+                                    type="button"
+                                  >
+                                    {savingUserId === String(member.userId)
+                                      ? "Saving..."
+                                      : "Save"}
+                                  </button>
+                                  <button
+                                    className="secondary-btn"
+                                    onClick={cancelEditingUser}
+                                    type="button"
+                                  >
+                                    Cancel
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  className="secondary-btn"
+                                  onClick={() => startEditingUser(member)}
+                                  type="button"
+                                >
+                                  Edit
+                                </button>
+                              )}
+                              <button
+                                className="danger-btn"
+                                disabled={
+                                  deletingUserId === String(member.userId) ||
+                                  String(member.userId) === String(user?.id) ||
+                                  member.role === "Admin"
+                                }
+                                onClick={() => handleDeleteUser(member.userId)}
+                                type="button"
+                              >
+                                {deletingUserId === String(member.userId)
+                                  ? "Deleting..."
+                                  : "Delete"}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="empty-state">No users available to manage yet.</p>
               )}
             </section>
           )}

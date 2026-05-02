@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import Layout from "../components/Layout";
 import LoadingSpinner from "../components/LoadingSpinner";
 import Notification from "../components/Notification";
@@ -13,11 +13,33 @@ const initialTaskForm = {
   dueDate: "",
 };
 
+const initialEditTaskForm = {
+  title: "",
+  description: "",
+  assignedTo: "",
+  dueDate: "",
+  status: "TODO",
+};
+
+const toDateInputValue = (value) => {
+  if (!value) {
+    return "";
+  }
+
+  if (typeof value === "string") {
+    return value.split("T")[0];
+  }
+
+  return new Date(value).toISOString().split("T")[0];
+};
+
 const Tasks = () => {
   const { user } = useAuth();
   const [tasks, setTasks] = useState([]);
   const [projects, setProjects] = useState([]);
   const [taskForm, setTaskForm] = useState(initialTaskForm);
+  const [editingTaskId, setEditingTaskId] = useState("");
+  const [editingTaskForm, setEditingTaskForm] = useState(initialEditTaskForm);
   const [filters, setFilters] = useState({
     project: "",
     status: "",
@@ -25,6 +47,8 @@ const Tasks = () => {
   });
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [savingTaskId, setSavingTaskId] = useState("");
+  const [deletingTaskId, setDeletingTaskId] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -96,6 +120,10 @@ const Tasks = () => {
     await loadTasks(updatedFilters);
   };
 
+  const handleEditTaskChange = (event) => {
+    setEditingTaskForm((prev) => ({ ...prev, [event.target.name]: event.target.value }));
+  };
+
   const handleCreateTask = async (event) => {
     event.preventDefault();
     setMessage("");
@@ -138,6 +166,70 @@ const Tasks = () => {
     }
   };
 
+  const startEditingTask = (task) => {
+    setEditingTaskId(task._id);
+    setEditingTaskForm({
+      title: task.title,
+      description: task.description,
+      assignedTo: task.assignedTo?._id || task.assignedTo?.id || "",
+      dueDate: toDateInputValue(task.dueDate),
+      status: task.status,
+    });
+    setMessage("");
+    setError("");
+  };
+
+  const cancelEditingTask = () => {
+    setEditingTaskId("");
+    setEditingTaskForm(initialEditTaskForm);
+  };
+
+  const handleSaveTaskEdit = async (taskId) => {
+    setMessage("");
+    setError("");
+
+    if (
+      !editingTaskForm.title ||
+      !editingTaskForm.description ||
+      !editingTaskForm.assignedTo ||
+      !editingTaskForm.dueDate
+    ) {
+      setError("Please complete all editable task fields");
+      return;
+    }
+
+    setSavingTaskId(taskId);
+    try {
+      await api.put(`/tasks/${taskId}`, editingTaskForm);
+      setMessage("Task updated successfully");
+      cancelEditingTask();
+      await loadTasks();
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Failed to update task");
+    } finally {
+      setSavingTaskId("");
+    }
+  };
+
+  const handleDeleteTask = async (taskId) => {
+    setMessage("");
+    setError("");
+    setDeletingTaskId(taskId);
+
+    try {
+      await api.delete(`/tasks/${taskId}`);
+      setMessage("Task deleted successfully");
+      if (editingTaskId === taskId) {
+        cancelEditingTask();
+      }
+      await loadTasks();
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Failed to delete task");
+    } finally {
+      setDeletingTaskId("");
+    }
+  };
+
   const selectedProject = projects.find((project) => project._id === taskForm.projectId);
   const assignableMembers = selectedProject?.members || [];
 
@@ -145,7 +237,11 @@ const Tasks = () => {
     <Layout>
       <section className="page-header">
         <h2>Tasks</h2>
-        <p>Create tasks, filter the workload, and keep status up to date.</p>
+        <p>
+          {user?.role === "Admin"
+            ? "Create tasks, assign work, and manage progress across projects."
+            : "Track your assigned work, filter tasks, and keep your status updated."}
+        </p>
       </section>
 
       <Notification message={message} type="success" />
@@ -246,30 +342,148 @@ const Tasks = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {tasks.map((task) => (
-                      <tr key={task._id}>
-                        <td>{task.title}</td>
-                        <td>{task.projectId?.name || "Deleted Project"}</td>
-                        <td>{task.assignedTo?.name}</td>
-                        <td>{task.status}</td>
-                        <td>{new Date(task.dueDate).toLocaleDateString()}</td>
-                        <td>
-                          {task.completedAt
-                            ? new Date(task.completedAt).toLocaleDateString()
-                            : "-"}
-                        </td>
-                        <td>
-                          <select
-                            onChange={(event) => handleStatusUpdate(task._id, event.target.value)}
-                            value={task.status}
-                          >
-                            <option value="TODO">TODO</option>
-                            <option value="IN_PROGRESS">IN_PROGRESS</option>
-                            <option value="DONE">DONE</option>
-                          </select>
-                        </td>
-                      </tr>
-                    ))}
+                    {tasks.map((task) => {
+                      const editableProject = projects.find(
+                        (project) => project._id === (task.projectId?._id || task.projectId?.id)
+                      );
+                      const editableMembers = editableProject?.members || [];
+                      const isPendingMemberTask =
+                        user?.role === "Member" && task.status !== "DONE";
+
+                      return (
+                        <Fragment key={task._id}>
+                          <tr className={isPendingMemberTask ? "pending-task-row" : ""} key={task._id}>
+                            <td>
+                              <div className="task-title-cell">
+                                {isPendingMemberTask && <span className="task-alert-dot" />}
+                                <span>{task.title}</span>
+                              </div>
+                            </td>
+                            <td>{task.projectId?.name || "Deleted Project"}</td>
+                            <td>{task.assignedTo?.name}</td>
+                            <td>
+                              <span
+                                className={
+                                  isPendingMemberTask ? "task-status-chip pending" : "task-status-chip"
+                                }
+                              >
+                                {task.status}
+                              </span>
+                            </td>
+                            <td>{new Date(task.dueDate).toLocaleDateString()}</td>
+                            <td>
+                              {task.completedAt
+                                ? new Date(task.completedAt).toLocaleDateString()
+                                : "-"}
+                            </td>
+                            <td>
+                              <div className="task-action-group">
+                                <select
+                                  onChange={(event) =>
+                                    handleStatusUpdate(task._id, event.target.value)
+                                  }
+                                  value={task.status}
+                                >
+                                  <option value="TODO">TODO</option>
+                                  <option value="IN_PROGRESS">IN_PROGRESS</option>
+                                  <option value="DONE">DONE</option>
+                                </select>
+                                {user?.role === "Admin" && (
+                                  <div className="action-row">
+                                    <button
+                                      className="secondary-btn"
+                                      onClick={() => startEditingTask(task)}
+                                      type="button"
+                                    >
+                                      {editingTaskId === task._id ? "Editing" : "Edit"}
+                                    </button>
+                                    <button
+                                      className="danger-btn"
+                                      disabled={deletingTaskId === task._id}
+                                      onClick={() => handleDeleteTask(task._id)}
+                                      type="button"
+                                    >
+                                      {deletingTaskId === task._id ? "Deleting..." : "Delete"}
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                          {user?.role === "Admin" && editingTaskId === task._id && (
+                            <tr className="editor-row" key={`${task._id}-editor`}>
+                              <td colSpan="7">
+                                <div className="editor-panel">
+                                  <div className="form-grid">
+                                    <input
+                                      name="title"
+                                      onChange={handleEditTaskChange}
+                                      placeholder="Task title"
+                                      type="text"
+                                      value={editingTaskForm.title}
+                                    />
+                                    <input
+                                      name="description"
+                                      onChange={handleEditTaskChange}
+                                      placeholder="Task description"
+                                      type="text"
+                                      value={editingTaskForm.description}
+                                    />
+                                    <select
+                                      name="assignedTo"
+                                      onChange={handleEditTaskChange}
+                                      value={editingTaskForm.assignedTo}
+                                    >
+                                      <option value="">Assign member</option>
+                                      {editableMembers.map((member) => (
+                                        <option
+                                          key={member._id || member.id}
+                                          value={member._id || member.id}
+                                        >
+                                          {member.name} ({member.role})
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <input
+                                      name="dueDate"
+                                      onChange={handleEditTaskChange}
+                                      type="date"
+                                      value={editingTaskForm.dueDate}
+                                    />
+                                    <select
+                                      name="status"
+                                      onChange={handleEditTaskChange}
+                                      value={editingTaskForm.status}
+                                    >
+                                      <option value="TODO">TODO</option>
+                                      <option value="IN_PROGRESS">IN_PROGRESS</option>
+                                      <option value="DONE">DONE</option>
+                                    </select>
+                                  </div>
+                                  <div className="action-row">
+                                    <button
+                                      className="primary-btn"
+                                      disabled={savingTaskId === task._id}
+                                      onClick={() => handleSaveTaskEdit(task._id)}
+                                      type="button"
+                                    >
+                                      {savingTaskId === task._id ? "Saving..." : "Save Changes"}
+                                    </button>
+                                    <button
+                                      className="secondary-btn"
+                                      onClick={cancelEditingTask}
+                                      type="button"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
